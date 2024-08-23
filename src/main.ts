@@ -1,15 +1,15 @@
 import { PlaywrightCrawler, Dataset } from 'crawlee';
+
 import { refuseConsentPopup, scrollAndLoadMore } from './utils.js';
 import { Job } from './types.js';
 
-const searchTerm = 'software engineer';
-
 const crawler = new PlaywrightCrawler({
-  async requestHandler({ page, request }) {
+  async requestHandler({ page }) {
 
     await refuseConsentPopup(page);
 
-    await scrollAndLoadMore(page, 1);
+    const pageAmount = process.argv.slice(3)[0];
+    await scrollAndLoadMore(page, Number(pageAmount) ?? 1);
 
     await page.screenshot({ path: 'screenshot.png', fullPage: true });
 
@@ -50,37 +50,38 @@ const crawler = new PlaywrightCrawler({
       processListings(listings);
       return jobs;
     }`;
-  
-  await page.evaluate(`window.getJobListings = ${getJobListings}`);
-  
-  const jobListings = await page.$$eval('infinity-scrolling > div > div > div', (listings) => {
-    const allJobs: Array<Job> = window.getJobListings(listings);
 
-    return allJobs.filter(job => job.title && job.company);
-  });
+    await page.evaluate(`window.getJobListings = ${getJobListings}`);
 
-  await Dataset.pushData({
-      title: await page.title(),
-      url: request.url,
-      data: jobListings,
-      succeeded: true,
-      created_time: new Date(),
-  })
+    const jobListings = await page.$$eval('infinity-scrolling > div > div > div', (listings) => {
+      const allJobs: Array<Job> = window.getJobListings(listings);
+
+      return allJobs.filter(job => job.title && job.company);
+    });
+
+    await Dataset.pushData(jobListings);
+
+    await Dataset.exportToCSV('OUTPUT');
 
   },
   async failedRequestHandler({ request }) {
-      await Dataset.pushData({
-          url: request.url,
-          succeeded: false,
-          data: null,
-          errors: request.errorMessages,
-          created_time: new Date(),
-      })
+    await Dataset.pushData({
+      url: request.url,
+      succeeded: false,
+      data: null,
+      errors: request.errorMessages,
+      created_time: new Date(),
+    })
   },
 });
 
-await crawler.addRequests(['https://www.google.com/search?q=aide soignant paris&ibp=htl;jobs']);
+const keyword = process.argv.slice(2)[0];
 
-await crawler.run();
+if (keyword) {
+  await crawler.addRequests([`https://www.google.com/search?q=${keyword}&ibp=htl;jobs`]);
+  await crawler.run();
+} else {
+  console.log('No keyword provided');
+}
 
-console.log('Scraping completed. Data saved to google_jobs.csv');
+console.log('Scraping completed. Data saved to key_value_stores/default/OUTPUT.csv');
